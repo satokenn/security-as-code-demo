@@ -1,0 +1,42 @@
+# 実例ポリシー（典型的なWebアプリ）。threat-model.yaml と対で、鎖が通ることを示す。
+# 濫用ケーステスト（security/tests/abuse_cases/SEC-0x_*/）の SEC-ID と一致させてある。
+version: 1
+project: "example-webapp"
+assurance_level: ASVS-L2
+
+controls:
+  authn:                 true
+  authz:                 true
+  input_validation:      true
+  secrets_management:    true
+  transport_encryption:  true
+  sensitive_logging:     true
+  dependency_hygiene:    true
+
+severity_gate:
+  sast_fail_on:          high
+  dependencies_fail_on:  high
+  secrets_fail_on:       any
+  iac_fail_on:           high
+
+exceptions: []
+
+sec_requirements:
+  - sec_id: SEC-01
+    title: "認可境界（水平・IDOR防止）"
+    controls: [authz]
+  - sec_id: SEC-02
+    title: "権限昇格の防止（垂直認可）"
+    controls: [authz]
+  - sec_id: SEC-03
+    title: "入力検証"
+    controls: [input_validation]
+  - sec_id: SEC-04
+    title: "機微情報のログ非出力"
+    controls: [sensitive_logging]
+  - sec_id: SEC-05
+    title: "パストラバーサルの防止"
+    controls: [input_validation]
+  - sec_id: SEC-06
+    title: "認証必須（未認証アクセス拒否）"
+    controls: [authn]

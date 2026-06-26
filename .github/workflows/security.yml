@@ -1,0 +1,123 @@
+# Security as Code — セキュリティCI（雛形）
+# -----------------------------------------------------------------------------
+# このワークフローは security/policy.yaml を正本に、SAST・秘密情報・依存脆弱性を検査する。
+# 新PJ作成時に .github/workflows/security.yml として展開される。
+#
+# 現段階は「雛形＋プレースホルダ」：
+#   - job/トリガ/policy 参照の骨格は確定している。
+#   - 各スキャナ step は TODO(SaC) コメントで無効化してある（policy.yaml の scanners.*.enabled が false）。
+#   - 実スキャナ有効化は後続タスク。有効化時は policy.yaml の enabled を true にし、
+#     対応 step の TODO を外す。
+#
+# スタック非依存：特定言語のセットアップを前提にしない。多言語対応ツールを使う。
+# -----------------------------------------------------------------------------
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  security-events: write   # SARIF アップロード用（スキャナ有効化時）
+
+jobs:
+  detect-stack:
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.detect.outputs.languages }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        name: スタック自動検出
+        shell: bash
+        run: |
+          # リポジトリの中身からスタックを推定（スキャナ設定の分岐に使う）。
+          langs=""
+          [ -f package.json ]        && langs="$langs node"
+          [ -f pyproject.toml ] || [ -f requirements.txt ] && langs="$langs python"
+          [ -f go.mod ]              && langs="$langs go"
+          [ -f Cargo.toml ]          && langs="$langs rust"
+          [ -f pom.xml ] || [ -f build.gradle ] || [ -f build.gradle.kts ] && langs="$langs java"
+          echo "languages=$(echo $langs | xargs)" >> "$GITHUB_OUTPUT"
+          echo "検出スタック: $langs"
+
+  threat-model-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: 脅威モデル検証（Threat Modeling as Code）
+        shell: bash
+        run: |
+          # 外部スキャナに依存しない自己完結の検証。現段階から実際に動くゲート。
+          # threat-model.yaml と policy.yaml の相互整合（脅威↔統制↔SEC-ID の鎖）を機械判定する。
+          pip install --quiet pyyaml
+          python security/scripts/validate_threat_model.py
+
+  sast:
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: SAST（静的解析・実稼働）
+        shell: bash
+        run: |
+          # 実稼働の SAST。同梱の security/semgrep-rules.yaml（オフライン）で検出し、
+          # ERROR があれば --error で fail する。広く見たい場合は --config auto を追加する。
+          pip install --quiet semgrep
+          semgrep --config security/semgrep-rules.yaml --error .
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 履歴全体を走査するため
+      - name: 秘密情報スキャン
+        shell: bash
+        run: |
+          echo "policy: scanners.secrets.tool=gitleaks / severity_gate.secrets_fail_on=any"
+          # TODO(SaC): scanners.secrets.enabled を true にしたら下を有効化する。
+          # gitleaks detect --redact --report-format sarif --report-path gitleaks.sarif
+          echo "[placeholder] 秘密情報スキャンは未有効化（policy.yaml の scanners.secrets.enabled=false）"
+
+  dependency-scan:
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 依存脆弱性スキャン（SCA）
+        shell: bash
+        run: |
+          echo "policy: scanners.dependencies.tool=osv-scanner / severity_gate.dependencies_fail_on=high"
+          # TODO(SaC): scanners.dependencies.enabled を true にしたら下を有効化する。
+          # osv-scanner scan --recursive --format sarif --output osv.sarif .
+          echo "[placeholder] 依存脆弱性スキャンは未有効化（policy.yaml の scanners.dependencies.enabled=false）"
+
+  policy-gate:
+    needs: [threat-model-check, sast, secret-scan, dependency-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ポリシーゲート判定
+        shell: bash
+        run: |
+          # policy.yaml の severity_gate と各スキャナ結果（SARIF）を突き合わせ合否を出す。
+          # 現段階はスキャナがプレースホルダのため、ポリシーの存在と妥当性のみ確認する。
+          if [ ! -s security/policy.yaml ]; then
+            echo "::error::security/policy.yaml が存在しないか空です（Security as Code の正本が必要）"
+            exit 1
+          fi
+          # YAML 妥当性は pyyaml があれば確認（無ければ存在チェックのみ）。
+          python -c "import yaml" 2>/dev/null && \
+            python -c "import yaml; yaml.safe_load(open('security/policy.yaml')); print('policy.yaml: YAML OK')" || \
+            echo "policy.yaml: 存在確認 OK（pyyaml 未導入のため構文チェックはスキップ）"
+          # TODO(SaC): スキャナ有効化後、SARIF を読み severity_gate のしきい値超過で exit 1 する判定をここに実装。
+          echo "[placeholder] severity ゲート判定はスキャナ有効化後に実装"

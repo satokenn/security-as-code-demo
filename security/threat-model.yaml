@@ -1,0 +1,86 @@
+# 実例の脅威モデル（典型的なWebアプリ）。policy.yaml（同フォルダ）と対。
+# 各脅威は SEC-01..06 に対応し、同名の濫用ケーステスト（security/tests/abuse_cases/）で実証される。
+# validate_threat_model.py に通る（鎖が閉じている）ことを自己テストで確認する。
+version: 1
+project: "example-webapp"
+
+assets:
+  - id: AS-01
+    name: "ユーザーの個人データ"
+    security_goals: [confidentiality, integrity]
+  - id: AS-02
+    name: "管理機能（アカウント削除など）"
+    security_goals: [integrity, availability]
+  - id: AS-03
+    name: "資格情報・秘密情報"
+    security_goals: [confidentiality]
+  - id: AS-04
+    name: "サーバ上のファイル"
+    security_goals: [confidentiality, integrity]
+
+trust_boundaries:
+  - id: TB-01
+    description: "インターネット → アプリ（認証・認可境界）"
+  - id: TB-02
+    description: "アプリ → ファイルシステム"
+
+threats:
+  - id: TH-01
+    stride: information_disclosure
+    description: "他人のリソースIDを指定して他ユーザーのデータを閲覧（IDOR）"
+    assets: [AS-01]
+    boundary: TB-01
+    control: authz
+    sec_id: SEC-01
+    mitigation: "取得時に所有者一致を必須化（非所有者は拒否）"
+    residual_risk: none
+
+  - id: TH-02
+    stride: elevation_of_privilege
+    description: "一般ユーザーが管理操作（他人のアカウント削除）を実行"
+    assets: [AS-02]
+    boundary: TB-01
+    control: authz
+    sec_id: SEC-02
+    mitigation: "管理操作は admin 役割のみ許可"
+    residual_risk: none
+
+  - id: TH-03
+    stride: tampering
+    description: "不正・超長な入力でインジェクションや破壊を狙う"
+    assets: [AS-01]
+    boundary: TB-01
+    control: input_validation
+    sec_id: SEC-03
+    mitigation: "型・長さ・文字種を検証し不正値を拒否"
+    residual_risk: none
+
+  - id: TH-04
+    stride: information_disclosure
+    description: "パスワード等の機微情報がログに出力され漏えい"
+    assets: [AS-03]
+    boundary: TB-01
+    control: sensitive_logging
+    sec_id: SEC-04
+    mitigation: "機微情報をログに書かない（マスク/除外）"
+    residual_risk: none
+
+  - id: TH-05
+    stride: information_disclosure
+    description: "../ を含むパスで base 外のファイルへアクセス（パストラバーサル）"
+    assets: [AS-04]
+    boundary: TB-02
+    control: input_validation
+    sec_id: SEC-05
+    mitigation: "正規化後に base 配下であることを強制"
+    residual_risk: none
+
+  - id: TH-06
+    stride: spoofing
+    description: "未認証のままセッション無しで保護リソースへアクセス"
+    assets: [AS-01]
+    boundary: TB-01
+    control: authn
+    sec_id: SEC-06
+    mitigation: "認証済みセッションが無ければ拒否"
+    residual_risk: none

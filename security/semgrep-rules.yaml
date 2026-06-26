@@ -1,0 +1,43 @@
+# SAST スタータールール（Semgrep・オフライン／registry不要）
+# -----------------------------------------------------------------------------
+# これは「実際に走って脆弱性を検出する」本物のルール。policy.yaml の controls に対応する。
+# 新PJに展開され、CI の sast ジョブが `semgrep --config security/semgrep-rules.yaml --error` で叩く。
+#
+# 位置づけ：依存の軽い「床」のルール集。より広く見たい場合は CI で `--config auto`
+# （Semgrep レジストリの多言語ルール）を併用する（ネットワークが要る）。
+# 誤検知が出たら policy.yaml の exceptions（owner/expiry/reason）で受容を明示する。
+# -----------------------------------------------------------------------------
+rules:
+  - id: hardcoded-secret
+    languages: [python, javascript, typescript, go, java]
+    severity: ERROR
+    message: "秘密情報がハードコードされている（policy: secrets_management 違反）。環境変数/シークレットストアから注入する。"
+    patterns:
+      - pattern-regex: '(?i)(api[_-]?key|secret|passwd|password|token|access[_-]?key)\s*[:=]\s*["''][A-Za-z0-9_\-\/+]{12,}["'']'
+
+  - id: dangerous-eval
+    languages: [python]
+    severity: ERROR
+    message: "eval によるコード実行（policy: input_validation 違反）。動的評価をやめ、明示的なパースに置き換える。"
+    pattern: eval(...)
+
+  - id: sql-string-build
+    languages: [python]
+    severity: ERROR
+    message: "SQL を文字列連結/f-string で組み立て（SQLインジェクション）。プレースホルダ（パラメータ化クエリ）を使う。"
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.execute(f"...", ...)
+          - pattern: $CUR.execute(f"...")
+          - pattern: $CUR.execute("..." % ...)
+          - pattern: $CUR.execute("..." + ...)
+
+  - id: subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: "subprocess を shell=True で実行（コマンドインジェクション）。引数を配列で渡し shell=False にする。"
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(..., shell=True, ...)
+          - pattern: subprocess.call(..., shell=True, ...)
+          - pattern: subprocess.Popen(..., shell=True, ...)
