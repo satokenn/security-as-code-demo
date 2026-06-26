@@ -78,17 +78,27 @@ jobs:
           python - <<'PY'
           import json, os
           rs = json.load(open("semgrep.json")).get("results", [])
+          header = [
+            "## セキュリティ検査（Security as Code ゲート）",
+            "",
+            "- 目的：このPRの変更に既知の脆弱性が無いかをマージ前に自動検査し、あればマージを止める。",
+            "- 対象：リポジトリのコード（静的解析）と、脅威モデルの整合。",
+            "- 工程：detect-stack（スタック判定）→ threat-model-check（脅威↔統制↔SEC-ID の整合）→ sast（コードの脆弱パターン検出）→ secret-scan / dependency-scan（現状プレースホルダ）→ policy-gate。",
+            "- このコメントの対象：SAST（semgrep / `security/semgrep-rules.yaml`）。検出パターン＝秘密のハードコード・eval・SQLインジェクション・shell=True。",
+            "",
+          ]
           if rs:
-              md = [f"## 🔴 セキュリティ検査：脆弱性 {len(rs)} 件を検出（このPRはマージ不可）", "",
-                    "| ルール | 箇所 | 内容 |", "|---|---|---|"]
+              body = [f"### 🔴 結果：脆弱性 {len(rs)} 件を検出（このPRはマージ不可）", "",
+                      "| ルール | 箇所 | 内容 |", "|---|---|---|"]
               for r in rs:
                   rule = r["check_id"].split(".")[-1]
                   loc = f'{r["path"]}:{r["start"]["line"]}'
                   msg = r["extra"]["message"].replace("\n", " ").strip()
-                  md.append(f"| `{rule}` | `{loc}` | {msg} |")
+                  body.append(f"| `{rule}` | `{loc}` | {msg} |")
+              body += ["", "直し方：上記の箇所を修正して push すると再検査され、検出ゼロで緑になればマージ可能。"]
           else:
-              md = ["## 🟢 セキュリティ検査（SAST）：脆弱性は検出されませんでした"]
-          text = "\n".join(md)
+              body = ["### 🟢 結果：脆弱性は検出されませんでした（SAST 緑）"]
+          text = "\n".join(header + body)
           open("findings.md", "w").write(text + "\n")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
               f.write(text + "\n")
