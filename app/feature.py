@@ -1,10 +1,13 @@
-"""わざと脆弱な機能追加（デモ用）。SAST が検出して CI を赤くするはず。"""
+"""機能追加（修正版）。脆弱性を取り除いた。SAST は緑になるはず。"""
+import os
 import sqlite3
 
-API_KEY = "sk_live_AbCdEf123456789TOKEN"   # NG: 秘密のハードコード
+
+def api_key():
+    return os.environ["API_KEY"]   # 環境変数から（ハードコードしない）
 
 
 def run(user_input, cursor):
-    result = eval(user_input)                                            # NG: eval
-    cursor.execute(f"SELECT * FROM users WHERE name = '{user_input}'")   # NG: SQLi
-    return result
+    # eval を使わず、パラメータ化クエリで安全に
+    cursor.execute("SELECT * FROM users WHERE name = ?", (user_input,))
+    return cursor.fetchall()
