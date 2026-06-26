@@ -20,7 +20,8 @@ on:
 
 permissions:
   contents: read
-  security-events: write   # SARIF アップロード用（スキャナ有効化時）
+  security-events: write
+  pull-requests: write   # 検出結果を PR にコメントするため
 
 jobs:
   detect-stack:
@@ -67,12 +68,47 @@ jobs:
         with:
           python-version: '3.x'
       - name: SAST（静的解析・実稼働）
+        id: sast
         shell: bash
         run: |
-          # 実稼働の SAST。同梱の security/semgrep-rules.yaml（オフライン）で検出し、
-          # ERROR があれば --error で fail する。広く見たい場合は --config auto を追加する。
+          # 実稼働の SAST。検出結果を JSON で集め、読みやすい表に整形して
+          # PR コメント・実行サマリに出す（何を検出したか一目で分かるように）。
           pip install --quiet semgrep
-          semgrep --config security/semgrep-rules.yaml --error .
+          semgrep --config security/semgrep-rules.yaml --json --output semgrep.json . || true
+          python - <<'PY'
+          import json, os
+          rs = json.load(open("semgrep.json")).get("results", [])
+          if rs:
+              md = [f"## 🔴 セキュリティ検査：脆弱性 {len(rs)} 件を検出（このPRはマージ不可）", "",
+                    "| ルール | 箇所 | 内容 |", "|---|---|---|"]
+              for r in rs:
+                  rule = r["check_id"].split(".")[-1]
+                  loc = f'{r["path"]}:{r["start"]["line"]}'
+                  msg = r["extra"]["message"].replace("\n", " ").strip()
+                  md.append(f"| `{rule}` | `{loc}` | {msg} |")
+          else:
+              md = ["## 🟢 セキュリティ検査（SAST）：脆弱性は検出されませんでした"]
+          text = "\n".join(md)
+          open("findings.md", "w").write(text + "\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(text + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"count={len(rs)}\n")
+          PY
+      - name: 検出結果を PR にコメント
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh pr comment "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" --body-file findings.md
+      - name: 検出があれば fail（ゲート）
+        shell: bash
+        run: |
+          if [ "${{ steps.sast.outputs.count }}" != "0" ]; then
+            echo "::error::SAST が脆弱性 ${{ steps.sast.outputs.count }} 件を検出"
+            exit 1
+          fi
+          echo "SAST: 検出なし"
 
   secret-scan:
     runs-on: ubuntu-latest
